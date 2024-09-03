@@ -118,9 +118,13 @@ async def new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Echo the user message."""
     exist = await messages.contains_cross_words(update.message.text)
+    firstname  = update.message.from_user.first_name
+    lastname  = update.message.from_user.last_name
+    
     if exist is True:
         chat_id = update.message.chat_id
-        await messages.sendMsgToAdmins(chat_id, context, update.message.text)
+        msg = firstname + " " + lastname + "-ի հաղորդագրությունը հեռացվել է։ Հաղորդագրությունը եղել է՝ " + update.message.text + " 🗑️"
+        await messages.sendMsgToAdmins(chat_id, context, msg)
         await context.bot.delete_message(chat_id, message_id=update.message.message_id)
 
 
