@@ -25,27 +25,24 @@
 import cv2 as cv
 
 def checkIsSelfie(path):
-    # Load the Haar cascade for face detection
     face_cascade = cv.CascadeClassifier('haarcascade_frontalface_default.xml')
     
-    # Read the image
     img = cv.imread(path)
     gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
     
-    # Detect faces
     faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
     
     if len(faces) == 0:
         return False
     
-    height, width, _ = img.shape
-    image_center = (width / 2, height / 2)
+    # check if image want to be in center
+    # height, width, _ = img.shape
+    # image_center = (width / 2, height / 2)
     
-    for (x, y, w, h) in faces:
-        face_center = (x + w / 2, y + h / 2)
+    # for (x, y, w, h) in faces:
+    #     face_center = (x + w / 2, y + h / 2)
         
-        # Check if the face is centered
-        if abs(face_center[0] - image_center[0]) < width * 0.2 and abs(face_center[1] - image_center[1]) < height * 0.2:
-            return True
+    #     if abs(face_center[0] - image_center[0]) < width * 0.2 and abs(face_center[1] - image_center[1]) < height * 0.2:
+    #         return True
     
-    return False
+    return True
