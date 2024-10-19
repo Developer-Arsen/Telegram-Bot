@@ -1,39 +1,18 @@
 import messages
 import photoChecker
-
 import os
-import logging
 
-from logging.handlers import RotatingFileHandler
 from dotenv import load_dotenv
-from telegram import Update
-from telegram.ext import Application, MessageHandler, filters, ContextTypes, CommandHandler
-from telegram.error import Forbidden
+from logger_config import setup_logger 
 
+from telegram import Update
+from telegram.ext import Application, MessageHandler, filters, ContextTypes
+from telegram.error import Forbidden
 
 load_dotenv()
 
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-
-logger = logging.getLogger("my_logger")
-logger.setLevel(logging.ERROR)
-
-handler = RotatingFileHandler("error_log.log", maxBytes=1000000, backupCount=5)
-handler.setLevel(logging.ERROR)
-
-# Create a logging format
-formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-handler.setFormatter(formatter)
-
-# Add the handler to the logger
-logger.addHandler(handler)
-
-logger = logging.getLogger(__name__)
-TIMEOUT = 15
-
+logger = setup_logger()
+logger.info("Bot has started.")
 
 async def checkPhotos(update: Update, context: ContextTypes.DEFAULT_TYPE, photos, member) -> bool:
     chat_id = update.message.chat_id
@@ -53,11 +32,6 @@ async def checkPhotos(update: Update, context: ContextTypes.DEFAULT_TYPE, photos
         if isValid is True:
             os.remove(path)
             return True
-        # if isValid is False:
-        #     await messages.sendMsgToAdmins(chat_id, context, await messages.ValidationErrorToAdmins(member, groupName, f"Missing face in {i + 1} image"))
-        #     await messages.sendPhotoToAdmins(chat_id, context, photo)
-        #     # await context.bot.ban_chat_member(update.message.chat_id, member.id)
-        #     return False
 
         os.remove(path)
     
@@ -74,13 +48,15 @@ async def allGreetingMessages(update: Update, context: ContextTypes.DEFAULT_TYPE
         msg = await messages.welcome_message(first_name, last_name)
         await context.bot.send_message(user_id, msg)
         await context.bot.send_message(user_id, messages.RULES)
-    except Forbidden:
+    except Forbidden as e:
+        logger.error(f"Forbidden: Cannot send a message to user {first_name} {last_name} (ID: {user_id}). Exception: {str(e)}")
         msg = first_name + " " + last_name + " " + messages.BLOCK_MSG
         await messages.sendMsgToAdmins(chat_id, context, msg)
+    except Exception as e:
+        logger.error(f"Unexpected error when greeting {first_name} {last_name}: {str(e)}")
 
     message = f"Բարի գալուստ 🎉: {first_name} {last_name} 👋\nնա միացել է {inviter.first_name} {inviter.last_name} հրավերով ✉️"
     await context.bot.send_message(chat_id, message)
-
 
 async def new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
@@ -88,32 +64,47 @@ async def new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     for member in update.message.new_chat_members:
         if member.is_bot:
+            logger.info(f"A bot ({member.first_name}) tried to join the group {groupName}, ignoring it.")
             continue
-        
+
         user_id = member.id
+        logger.info(f"New member {member.first_name} {member.last_name} (ID: {user_id}) joined the group {groupName}.")
 
         if member.last_name is None:
             await messages.sendMsgToAdmins(chat_id, context, await messages.ValidationErrorToAdmins(member, groupName, messages.NO_LAST_NANE_MSG))
             await context.bot.send_message(user_id, await messages.ValidationErrorToUser(messages.LAST_NAME))
             await context.bot.ban_chat_member(update.message.chat_id, member.id)
+            logger.warning(f"User {member.first_name} (ID: {user_id}) was banned due to missing last name.")
             return
 
         photos = await context.bot.get_user_profile_photos(user_id)
 
-        match photos.total_count:
-            case 0:
-                await messages.sendMsgToAdmins(chat_id, context, await messages.ValidationErrorToAdmins(member, groupName, messages.NO_PROFILE_PHOTO_MSG))
-                await context.bot.send_message(user_id, await messages.ValidationErrorToUser(messages.PROFILE_PHOTO_MSG))
-                await context.bot.ban_chat_member(update.message.chat_id, member.id)
-            case _:
-                isValid = await checkPhotos(update, context, photos, member)
-                if isValid:
-                    await allGreetingMessages(update, context, member)
-                else:
+        try:
+            match photos.total_count:
+                case 0:
                     await messages.sendMsgToAdmins(chat_id, context, await messages.ValidationErrorToAdmins(member, groupName, messages.NO_PROFILE_PHOTO_MSG))
                     await context.bot.send_message(user_id, await messages.ValidationErrorToUser(messages.NO_PROFILE_PHOTO_MSG))
+                    await context.bot.ban_chat_member(update.message.chat_id, member.id)
+                    logger.warning(f"User {member.first_name} (ID: {user_id}) was banned due to no profile photo.")
+                case _:
+                    isValid = await checkPhotos(update, context, photos, member)
+                    if isValid:
+                        await allGreetingMessages(update, context, member)
+                    else:
+                        print("here", isValid)
+                        await messages.sendMsgToAdmins(chat_id, context, await messages.ValidationErrorToAdmins(member, groupName, messages.PROFILE_PHOTO_MSG))
+                        print("here1")
+                        await context.bot.ban_chat_member(update.message.chat_id, member.id)
+                        print("here2")
+                        await context.bot.send_message(user_id, await messages.ValidationErrorToUser(messages.PROFILE_PHOTO_MSG))
+                        print("here3")
 
-                    
+                        logger.warning(f"User {member.first_name} (ID: {user_id}) was banned due to an invalid profile photo.")
+        except Forbidden as e:
+            await context.bot.ban_chat_member(update.message.chat_id, member.id)
+            logger.error(f"Forbidden: Cannot send a message to user {member.first_name} {member.last_name} (ID: {user_id}). Exception: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error occurred when handling new member {member.first_name} {member.last_name}: {str(e)}")
 
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Echo the user message."""
@@ -126,21 +117,18 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         msg = firstname + " " + lastname + "-ի հաղորդագրությունը հեռացվել է։ Հաղորդագրությունը եղել է՝ " + update.message.text + " 🗑️"
         await messages.sendMsgToAdmins(chat_id, context, msg)
         await context.bot.delete_message(chat_id, message_id=update.message.message_id)
-
-
+        logger.info(f"Deleted a message from {firstname} {lastname} due to inappropriate content.")
 
 def main() -> None:
     TOKEN = os.getenv("TOKEN")
     application = Application.builder().token(TOKEN).build()
 
+    logger.info("Starting the bot.")
+    
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
-
-    # application.add_handler(ChatMemberHandler(new_member, ChatMemberHandler.CHAT_MEMBER))
     application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_member))
 
     application.run_polling()
 
 if __name__ == '__main__':
     main()
-
-
